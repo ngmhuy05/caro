@@ -17,8 +17,8 @@ windowHeight = 800
 cellSize = 50
 
 yesButton, noButton :: (Float, Float, Float, Float)
-yesButton = (-120, -320, 140, 56)
-noButton  = ( 120, -320, 140, 56)
+yesButton = (-120, -360, 140, 56)  -- đặt dưới dòng Rematch?
+noButton  = ( 120, -360, 140, 56)
 
 -- ===== Client State =====
 data ClientState = ClientState
@@ -99,12 +99,12 @@ drawMessage msg =
             _ | "Waiting" `isPrefixOf` msg -> green
             _ | "Rematch" `isPrefixOf` msg -> green
             _ -> white
-  in translate 0 (-250) $ scale 0.2 0.2 $ color c $ Text msg
+  in translate 0 (-300) $ scale 0.2 0.2 $ color c $ Text msg
 
 drawChatHistory :: [String] -> Picture
 drawChatHistory hs =
   translate (fromIntegral (- (windowWidth `div` 2) + 20))
-            (fromIntegral (- (windowHeight `div` 2) + 180)) $
+            (fromIntegral (- (windowHeight `div` 2) + 140)) $
   Pictures $ zipWith drawLine ([0..] :: [Int]) (reverse hs)
   where
     drawLine :: Int -> String -> Picture
@@ -118,7 +118,7 @@ drawChatInput input cursorPos selAll =
   let (l,r) = splitAt cursorPos input
       shown = "> " ++ l ++ "|" ++ r
       bx = fromIntegral (- (windowWidth `div` 2) + 20)
-      by = fromIntegral (- (windowHeight `div` 2) + 40)
+      by = fromIntegral (- (windowHeight `div` 2) + 80)
       bg = if selAll && not (null input)
              then translate (bx + 200) (by + 3)
                   $ color (makeColor 0.3 0.3 0.8 0.5) (rectangleSolid 400 28)

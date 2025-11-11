@@ -3,35 +3,45 @@
 module Main where
 
 import Network.Socket
+import System.IO
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar
-import System.IO
-import GameState
-import Data.List (isPrefixOf)
-import Control.Exception (catch, SomeException, try, IOException)
+import Control.Exception (SomeException, try, IOException, catch)
 import Control.Monad (when)
+import System.Environment (getArgs)
+import Data.List (isPrefixOf)
 import Data.Maybe (listToMaybe)
+import GameState
 
 main :: IO ()
-main = do
+main = withSocketsDo $ do
   hSetBuffering stdout LineBuffering
   hSetEncoding stdout utf8
-  sock <- socket AF_INET Stream defaultProtocol
-  setSocketOption sock ReuseAddr 1
-  bindAnyOrLoopback sock 4444
-  listen sock 2
-  putStrLn "Server online, waiting for connections..."
+
+  args <- getArgs
+  let bindHost = case args of { (h:_) | not (null h) -> h; _ -> "0.0.0.0" }
+      bindPort = case args of { (_:p:_) | not (null p) -> p; _ -> "4444" }
+
+  sock <- setupListener bindHost bindPort
+  putStrLn $ "Server online, listening on " ++ bindHost ++ ":" ++ bindPort
   mainLoop sock
 
--- bind 0.0.0.0, nếu lỗi thì 127.0.0.1
-bindAnyOrLoopback :: Socket -> PortNumber -> IO ()
-bindAnyOrLoopback sock port = do
-  let anyAddr  = SockAddrInet port (tupleToHostAddress (0,0,0,0))
-      loopback = SockAddrInet port (tupleToHostAddress (127,0,0,1))
-  r <- try (bind sock anyAddr) :: IO (Either IOException ())
+setupListener :: String -> String -> IO Socket
+setupListener host port = do
+  let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream, addrFamily = AF_INET }
+  ais <- getAddrInfo (Just hints) (Just host) (Just port)
+  let ai = head ais
+  sock <- socket (addrFamily ai) (addrSocketType ai) defaultProtocol
+  setSocketOption sock ReuseAddr 1
+  r <- try (bind sock (addrAddress ai)) :: IO (Either IOException ())
   case r of
-    Right _ -> pure ()
-    Left _  -> bind sock loopback
+    Right _ -> listen sock 2 >> pure sock
+    Left _  -> do
+      lais <- getAddrInfo (Just hints) (Just "127.0.0.1") (Just port)
+      let lai = head lais
+      bind sock (addrAddress lai)
+      listen sock 2
+      pure sock
 
 mainLoop :: Socket -> IO ()
 mainLoop sock = do
