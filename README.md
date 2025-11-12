@@ -62,7 +62,7 @@ Kiểm tra từ máy khách: ```ping <IP_RADMIN_MAY_CHU>```
 
 Máy chủ
 ```bash
-./server.exe IP_MÁY_CHỦ 4.4.4.4
+./server.exe IP_MÁY_CHỦ 4444
 ```
 Người chơi 1-2
 ```bash
