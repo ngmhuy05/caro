@@ -1,4 +1,12 @@
 -- src/GUI.hs
+-- -----------------------------------------------------------------------------
+-- Lớp giao diện người dùng bằng Gloss.
+-- Chức năng:
+--   - Vẽ bàn cờ, quân cờ, thông báo, nút rematch, cửa sổ chat.
+--   - Bắt sự kiện chuột/phím, gửi lệnh nước đi và chat về server.
+--   - Vẽ đường thắng (nếu có) theo danh sách winningCells do server cung cấp.
+-- Lưu ý: giữ nguyên toàn bộ logic; chỉ bổ sung chú thích, dọn layout.
+-- -----------------------------------------------------------------------------
 module GUI (runGUI) where
 
 import Graphics.Gloss
@@ -7,20 +15,25 @@ import Control.Concurrent (forkIO, MVar, newMVar, modifyMVar, readMVar, swapMVar
 import Control.Monad (unless)
 import System.IO (Handle, hPutStrLn, hGetLine)
 import Data.Char (toUpper, isSpace)
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, minimumBy, maximumBy)
+import Data.Ord  (comparing)
 import GameState (Player(..), Game(..), GameStatus(..), Cell(..), boardSize, initialGame)
 
 -- ===== Layout =====
-windowWidth, windowHeight, cellSize :: Int
-windowWidth = 600
-windowHeight = 800
-cellSize = 50
 
+-- Kích thước cửa sổ và ô
+windowWidth, windowHeight, cellSize :: Int
+windowWidth  = 600
+windowHeight = 800
+cellSize     = 50
+
+-- Vị trí-nút rematch (x, y, w, h) trong toạ độ Gloss
 yesButton, noButton :: (Float, Float, Float, Float)
 yesButton = (-120, -360, 140, 56)
 noButton  = ( 120, -360, 140, 56)
 
 -- ===== Client State =====
+-- Trạng thái phía client cho GUI
 data ClientState = ClientState
   { gameState     :: Game
   , me            :: Player
@@ -40,20 +53,31 @@ data ClientState = ClientState
   }
 
 -- ===== Main =====
+-- Khởi động GUI và vòng sự kiện Gloss
 runGUI :: Handle -> Player -> IO ()
 runGUI h mePlayer = do
-  let st0 = ClientState initialGame mePlayer "Waiting for server..." h "" 0 [] False
-             False False False False False False 0 0 0 True True True
-             Nothing 0 True
+  let st0 = ClientState
+              initialGame
+              mePlayer
+              "Waiting for server..."
+              h "" 0 [] False
+              False False False
+              False False False
+              0 0 0
+              True True True
+              Nothing 0 True
   var <- newMVar st0
   _ <- forkIO (networkLoop h var)
-  playIO (InWindow "Gomoku" (windowWidth, windowHeight) (100,100))
-         black 30 st0
+  playIO (InWindow "CARO" (windowWidth, windowHeight) (100,100))
+         black
+         30
+         st0
          drawState
          (handleInput var)
          (updateState var)
 
 -- ===== Network =====
+-- Nhận dòng từ server, cập nhật state và tiếp tục lặp
 networkLoop :: Handle -> MVar ClientState -> IO ()
 networkLoop h var = do
   msg <- hGetLine h
@@ -71,14 +95,17 @@ networkLoop h var = do
                          Running -> if currentPlayer g == me st then "Your turn!" else "Waiting for opponent..."
                          Win p   -> "Player " ++ show p ++ " wins!"
                          Draw    -> "It's a draw!"
-          in return (st { gameState = g, statusMessage = newMsg
-                        , chatHistory = if board g == board initialGame then [] else chatHistory st }, Just g)
+          in return (st { gameState = g
+                        , statusMessage = newMsg
+                        , chatHistory = if board g == board initialGame then [] else chatHistory st
+                        }, Just g)
   case mNew of
     Just g | gameStatus g /= Running -> hPutStrLn h "GAME_OVER_ACK"
     _ -> return ()
   networkLoop h var
 
 -- ===== Tick =====
+-- Lặp theo dt để xử lý giữ phím (key repeat)
 updateState :: MVar ClientState -> Float -> ClientState -> IO ClientState
 updateState var dt _ = do
   st <- readMVar var
@@ -87,16 +114,18 @@ updateState var dt _ = do
   return st'
 
 -- ===== Draw =====
+-- Vẽ toàn bộ khung hình
 drawState :: ClientState -> IO Picture
 drawState st = return $ Pictures
   [ drawBoard (gameState st)
+  , drawWinningLine (gameState st)
   , drawMessage (statusMessage st)
   , drawRematchButtons st
   , drawChatHistory (chatHistory st)
   , drawChatInput (chatInput st) (chatCursor st) (selectAll st)
   ]
 
--- đặt status ngay dưới mép dưới của bàn cờ, cách 24px
+-- Thông báo: đặt ngay dưới bàn cờ, lệch xuống 24px
 drawMessage :: String -> Picture
 drawMessage msg =
   let c = case msg of
@@ -106,9 +135,10 @@ drawMessage msg =
             _ -> white
       w     = fromIntegral (boardSize * cellSize) :: Float
       half  = w / 2
-      below = (80 - half) - 24     -- 80 là translate của board
+      below = (80 - half) - 24
   in translate 0 below $ scale 0.2 0.2 $ color c $ Text msg
 
+-- Lịch sử chat (tối đa 6 dòng)
 drawChatHistory :: [String] -> Picture
 drawChatHistory hs =
   translate (fromIntegral (- (windowWidth `div` 2) + 20))
@@ -121,6 +151,7 @@ drawChatHistory hs =
       scale 0.15 0.15 $
       if "You:" `isPrefixOf` s then color cyan (Text s) else color white (Text s)
 
+-- Ô nhập chat + con trỏ
 drawChatInput :: String -> Int -> Bool -> Picture
 drawChatInput input cursorPos selAll =
   let (l,r) = splitAt cursorPos input
@@ -133,6 +164,7 @@ drawChatInput input cursorPos selAll =
              else Blank
   in Pictures [ bg, translate bx by $ scale 0.2 0.2 $ color cyan $ Text shown ]
 
+-- Nút rematch
 drawRematchButtons :: ClientState -> Picture
 drawRematchButtons st
   | statusMessage st == "Rematch? (Y/N)" = Pictures [yesPic, noPic]
@@ -145,6 +177,7 @@ drawRematchButtons st
     noPic  = Pictures [ translate x2 y2 $ color red   $ rectangleSolid w2 h2
                       , translate (x2 - w2/2 + 10) (y2 - 10) $ scale 0.2 0.2 $ color black $ Text "NO"]
 
+-- Bàn cờ + quân cờ
 drawBoard :: Game -> Picture
 drawBoard g =
   translate 0 80 $ Pictures (gridLines ++ pieces)
@@ -165,6 +198,58 @@ drawBoard g =
       , let x = fromIntegral (c * cellSize)
       , let y = fromIntegral (r * cellSize) ]
 
+-- Vẽ đường thắng theo danh sách winningCells (0-based)
+drawWinningLine :: Game -> Picture
+drawWinningLine g =
+  case winningCells g of
+    cells | length cells < 2 -> Blank
+    cells ->
+      let w    = fromIntegral (boardSize * cellSize) :: Float
+          half = w / 2
+
+          -- Tâm ô -> toạ độ Gloss (0,0) ở giữa bàn
+          toPt :: (Int,Int) -> (Float,Float)
+          toPt (r,c) =
+            ( fromIntegral (c * cellSize) + fromIntegral cellSize/2 - half
+            , half - fromIntegral (r * cellSize) - fromIntegral cellSize/2 )
+
+          rs = map fst cells
+          cs = map snd cells
+
+          allEq []     = True
+          allEq (x:xs) = all (== x) xs
+
+          -- Chọn hai đầu mút theo hướng
+          (aCell, bCell)
+            | allEq rs  = ((head rs, minimum cs), (head rs, maximum cs)) -- ngang
+            | allEq cs  = ((minimum rs, head cs), (maximum rs, head cs)) -- dọc
+            | otherwise =
+                let a = minimumBy (comparing fst) cells   -- chéo
+                    b = maximumBy (comparing fst) cells
+                in (a,b)
+
+          (x1,y1) = toPt aCell
+          (x2,y2) = toPt bCell
+
+          dx = x2 - x1; dy = y2 - y1
+          len = sqrt (dx*dx + dy*dy)
+          (ux,uy) = if len == 0 then (0,0) else (dx/len, dy/len)
+
+          -- Kéo ra mép ô đầu/cuối
+          extend = fromIntegral cellSize / 2
+          (x1e,y1e) = (x1 - ux*extend, y1 - uy*extend)
+          (x2e,y2e) = (x2 + ux*extend, y2 + uy*extend)
+
+          -- Thick line = hình tứ giác mỏng
+          thick = 12.0
+          (nx,ny) = (-uy * thick/2, ux * thick/2)
+          poly = Polygon [ (x1e - nx, y1e - ny)
+                         , (x1e + nx, y1e + ny)
+                         , (x2e + nx, y2e + ny)
+                         , (x2e - nx, y2e - ny) ]
+      in translate 0 80 $ Color cyan poly
+
+-- Vẽ quân
 drawCell :: Cell -> Picture
 drawCell Empty     = Blank
 drawCell (Taken X) = drawX
@@ -175,23 +260,25 @@ drawO = Color blue $ ThickCircle (fromIntegral cellSize * 0.4) 5
 
 drawX :: Picture
 drawX = Color red $ Pictures
-  [ Rotate 45  (Polygon [(-l,-t/2),(l,-t/2),(l,t/2),(-l,t/2)])
+  [ Rotate 45    (Polygon [(-l,-t/2),(l,-t/2),(l,t/2),(-l,t/2)])
   , Rotate (-45) (Polygon [(-l,-t/2),(l,-t/2),(l,t/2),(-l,t/2)])
   ]
   where l = fromIntegral cellSize * 0.45
         t = 8.0
 
 -- ===== Hit-test =====
+-- Kiểm tra click nằm trong hình chữ nhật tâm (rx,ry), kích thước (rw,rh)
 isClickInRect :: (Float, Float) -> (Float, Float, Float, Float) -> Bool
 isClickInRect (cx, cy) (rx, ry, rw, rh) =
   cx >= rx - rw / 2 && cx <= rx + rw / 2 &&
   cy >= ry - rh / 2 && cy <= ry + rh / 2
 
+-- Chuyển toạ độ màn hình -> (row,col) trên bàn (0-based)
 pixelToGrid :: (Float, Float) -> Maybe (Int, Int)
 pixelToGrid (mx, my) =
   let w = fromIntegral (boardSize * cellSize)
       half = w / 2
-      topY = 80 + half
+      topY = 80 + half   -- dịch bàn lên 80px
       leftX = -half
       cx = mx - leftX
       cy = topY - my
@@ -202,8 +289,10 @@ pixelToGrid (mx, my) =
             in if r >= 0 && r < boardSize && c >= 0 && c < boardSize then Just (r,c) else Nothing
 
 -- ===== Input =====
+-- Xử lý chuột/phím. Giữ nguyên thứ tự pattern như bản gốc.
+
+-- Click chuột trái: đánh cờ hoặc bấm rematch
 handleInput :: MVar ClientState -> Event -> ClientState -> IO ClientState
--- Mouse click: move, rematch
 handleInput var (EventKey (MouseButton LeftButton) Down _ (mx, my)) st
   | statusMessage st == "Rematch? (Y/N)" && isClickInRect (mx, my) yesButton =
       hPutStrLn (serverHandle st) "Y" >> swapMVar var (st { statusMessage = "Waiting for opponent..." }) >> return (st { statusMessage = "Waiting for opponent..." })
@@ -215,7 +304,7 @@ handleInput var (EventKey (MouseButton LeftButton) Down _ (mx, my)) st
         Nothing    -> return st
   | otherwise = return st
 
--- Enter: send chat
+-- Enter: gửi chat
 handleInput var (EventKey (SpecialKey KeyEnter) Down _ _) st = do
   let s = chatInput st
   unless (null s) $ hPutStrLn (serverHandle st) ("CHAT:" ++ s)
@@ -224,7 +313,7 @@ handleInput var (EventKey (SpecialKey KeyEnter) Down _ _) st = do
   _ <- swapMVar var st'
   return st'
 
--- Backspace with hold and Ctrl
+-- Backspace (nhấn-giữ, Ctrl xoá theo từ)
 handleInput var (EventKey (SpecialKey KeyBackspace) Down (Modifiers _ ctrl _) _) st
   | statusMessage st == "Rematch? (Y/N)" = return st
   | selectAll st =
@@ -245,7 +334,7 @@ handleInput var (EventKey (SpecialKey KeyBackspace) Down (Modifiers _ ctrl _) _)
 handleInput var (EventKey (SpecialKey KeyBackspace) Up _ _) st =
   swapMVar var (st { backHold = False }) >> return (st { backHold = False })
 
--- Arrow Left/Right with hold and Ctrl
+-- Mũi tên trái/phải (nhấn-giữ, Ctrl nhảy theo từ)
 handleInput var (EventKey (SpecialKey KeyLeft) Down (Modifiers _ ctrl _) _) st
   | statusMessage st == "Rematch? (Y/N)" = return st
   | otherwise =
@@ -270,7 +359,7 @@ handleInput var (EventKey (SpecialKey KeyRight) Down (Modifiers _ ctrl _) _) st
 handleInput var (EventKey (SpecialKey KeyRight) Up _ _) st =
   swapMVar var (st { rightHold = False }) >> return (st { rightHold = False })
 
--- Space with hold
+-- Space (nhấn-giữ để chèn liên tục)
 handleInput var (EventKey (SpecialKey KeySpace) Down _ _) st
   | statusMessage st == "Rematch? (Y/N)" = return st
   | otherwise =
@@ -285,7 +374,7 @@ handleInput var (EventKey (SpecialKey KeySpace) Up _ _) st =
   swapMVar var (st { charHold = Nothing, charTimer = 0, charInitial = True }) >>
   return (st { charHold = Nothing, charTimer = 0, charInitial = True })
 
--- Fallback delete/bs phát sinh dạng Char: đặt trước handler Char tổng quát
+-- Fallback cho phím xoá phát sinh dạng Char (tuỳ layout)
 handleInput var (EventKey (Char '\b')  Down (Modifiers _ ctrl _) _) st =
   handleInput var (EventKey (SpecialKey KeyBackspace) Down (Modifiers Up ctrl Up) (0,0)) st
 handleInput var (EventKey (Char '\b')  Up   _                         _) st =
@@ -295,7 +384,7 @@ handleInput var (EventKey (Char '\DEL') Down (Modifiers _ ctrl _) _) st =
 handleInput var (EventKey (Char '\DEL') Up   _                         _) st =
   handleInput var (EventKey (SpecialKey KeyBackspace) Up   (Modifiers Up Up  Up) (0,0)) st
 
--- Typing / Y/N in rematch / Char hold
+-- Gõ ký tự thường + Y/N ở màn rematch + giữ ký tự để lặp
 handleInput var (EventKey (Char c) Down _ _) st
   | statusMessage st == "Rematch? (Y/N)" =
       case toUpper c of
@@ -315,9 +404,12 @@ handleInput var (EventKey (Char _) Up _ _) st =
   swapMVar var (st { charHold = Nothing, charTimer = 0, charInitial = True }) >>
   return (st { charHold = Nothing, charTimer = 0, charInitial = True })
 
+-- Mặc định: không làm gì
 handleInput _ _ st = return st
 
 -- ===== Text edit helpers =====
+-- Chèn/xoá ký tự, nhảy theo từ, xoá theo từ
+
 insertCharAt :: Char -> String -> Int -> (String, Int)
 insertCharAt c s i = let (l,r) = splitAt i s in (l ++ [c] ++ r, i+1)
 
@@ -348,10 +440,12 @@ moveWordRight s i =
   in length s - length r''
 
 -- ===== Key repeat =====
+-- Tham số nhấn-giữ (delay ban đầu, tần số lặp)
 initialDelay, repeatRate :: Float
 initialDelay = 0.35
 repeatRate   = 0.05
 
+-- Áp dụng nhấn-giữ cho mũi tên trái/phải, backspace, và ký tự thường
 applyRepeats :: Float -> ClientState -> ClientState
 applyRepeats dt st =
   let (st1, _) =
