@@ -54,3 +54,21 @@ Terminal 3
 ```bash
 ./client.exe   # người chơi 2 (O)
 ```
+
+## (OPTIONAL) Chơi qua mạng sử dụng Radmin VPN
+Cài Radmin VPN trên cả hai máy, tạo private network chung 
+Lấy IP ảo của máy chủ trong Radmin (thường 26.x.x.x).
+Kiểm tra từ máy khách: ```ping <IP_RADMIN_MAY_CHU>```
+
+Máy chủ
+```bash
+./server.exe IP_MÁY_CHỦ 4.4.4.4
+```
+Người chơi 1-2
+```bash
+./client.exe <IP_RADMIN_MAY_CHU> 4444
+```
+Nếu bị lỗi không kết nối được thì hãy mở PowerShell bằng Admin và chạy 
+```bash
+netsh advfirewall firewall add rule name="Caro-Server-4444" dir=in program="%CD%\server.exe" action=allow enable=yes
+```
