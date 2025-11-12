@@ -32,12 +32,11 @@ thì hãy cài MSYS2 rồi mở nó lên và chạy dòng này ```pacman -S ming
 PowerShell
 ```bash
 Stop-Process -Name client,server -Force -ErrorAction SilentlyContinue
-Remove-Item .\server.exe, .\client.exe -Force -ErrorAction SilentlyContinue
-mkdir bin -ErrorAction SilentlyContinue | Out-Null
+Remove-Item .\client.exe, .\server.exe -Force -ErrorAction SilentlyContinue
+if (Test-Path .\bin) { Remove-Item .\bin\* -Recurse -Force -ErrorAction SilentlyContinue } else { New-Item -ItemType Directory -Path .\bin | Out-Null }
 
 ghc -isrc -O2 -Wall -threaded -odir bin -hidir bin -outputdir bin -o .\server.exe .\src\Server.hs
 ghc -isrc -O2 -Wall -threaded -odir bin -hidir bin -outputdir bin -o .\client.exe .\src\Client.hs
-
 ```
 
 ## Tạo 3 terminal để chạy server cho 2 người chơi tham gia
