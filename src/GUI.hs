@@ -96,6 +96,7 @@ drawState st = return $ Pictures
   , drawChatInput (chatInput st) (chatCursor st) (selectAll st)
   ]
 
+-- đặt status ngay dưới mép dưới của bàn cờ, cách 24px
 drawMessage :: String -> Picture
 drawMessage msg =
   let c = case msg of
@@ -103,7 +104,10 @@ drawMessage msg =
             _ | "Waiting" `isPrefixOf` msg -> green
             _ | "Rematch" `isPrefixOf` msg -> green
             _ -> white
-  in translate 0 (-300) $ scale 0.2 0.2 $ color c $ Text msg
+      w     = fromIntegral (boardSize * cellSize) :: Float
+      half  = w / 2
+      below = (80 - half) - 24     -- 80 là translate của board
+  in translate 0 below $ scale 0.2 0.2 $ color c $ Text msg
 
 drawChatHistory :: [String] -> Picture
 drawChatHistory hs =
@@ -281,7 +285,7 @@ handleInput var (EventKey (SpecialKey KeySpace) Up _ _) st =
   swapMVar var (st { charHold = Nothing, charTimer = 0, charInitial = True }) >>
   return (st { charHold = Nothing, charTimer = 0, charInitial = True })
 
--- === Fallback delete/bs phát sinh dạng Char: ĐẶT TRƯỚC handler Char tổng quát
+-- Fallback delete/bs phát sinh dạng Char: đặt trước handler Char tổng quát
 handleInput var (EventKey (Char '\b')  Down (Modifiers _ ctrl _) _) st =
   handleInput var (EventKey (SpecialKey KeyBackspace) Down (Modifiers Up ctrl Up) (0,0)) st
 handleInput var (EventKey (Char '\b')  Up   _                         _) st =
