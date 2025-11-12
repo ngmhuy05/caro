@@ -17,7 +17,7 @@ windowHeight = 800
 cellSize = 50
 
 yesButton, noButton :: (Float, Float, Float, Float)
-yesButton = (-120, -360, 140, 56)  -- đặt dưới dòng Rematch?
+yesButton = (-120, -360, 140, 56)
 noButton  = ( 120, -360, 140, 56)
 
 -- ===== Client State =====
@@ -34,6 +34,9 @@ data ClientState = ClientState
   , leftCtrlHold  :: Bool, rightCtrlHold :: Bool, backCtrlHold :: Bool
   , leftTimer     :: Float, rightTimer :: Float, backTimer :: Float
   , leftInitial   :: Bool, rightInitial :: Bool, backInitial :: Bool
+  , charHold      :: Maybe Char
+  , charTimer     :: Float
+  , charInitial   :: Bool
   }
 
 -- ===== Main =====
@@ -41,6 +44,7 @@ runGUI :: Handle -> Player -> IO ()
 runGUI h mePlayer = do
   let st0 = ClientState initialGame mePlayer "Waiting for server..." h "" 0 [] False
              False False False False False False 0 0 0 True True True
+             Nothing 0 True
   var <- newMVar st0
   _ <- forkIO (networkLoop h var)
   playIO (InWindow "Gomoku" (windowWidth, windowHeight) (100,100))
@@ -195,6 +199,7 @@ pixelToGrid (mx, my) =
 
 -- ===== Input =====
 handleInput :: MVar ClientState -> Event -> ClientState -> IO ClientState
+-- Mouse click: move, rematch
 handleInput var (EventKey (MouseButton LeftButton) Down _ (mx, my)) st
   | statusMessage st == "Rematch? (Y/N)" && isClickInRect (mx, my) yesButton =
       hPutStrLn (serverHandle st) "Y" >> swapMVar var (st { statusMessage = "Waiting for opponent..." }) >> return (st { statusMessage = "Waiting for opponent..." })
@@ -206,6 +211,7 @@ handleInput var (EventKey (MouseButton LeftButton) Down _ (mx, my)) st
         Nothing    -> return st
   | otherwise = return st
 
+-- Enter: send chat
 handleInput var (EventKey (SpecialKey KeyEnter) Down _ _) st = do
   let s = chatInput st
   unless (null s) $ hPutStrLn (serverHandle st) ("CHAT:" ++ s)
@@ -214,50 +220,78 @@ handleInput var (EventKey (SpecialKey KeyEnter) Down _ _) st = do
   _ <- swapMVar var st'
   return st'
 
--- Backspace + variations
+-- Backspace with hold and Ctrl
 handleInput var (EventKey (SpecialKey KeyBackspace) Down (Modifiers _ ctrl _) _) st
   | statusMessage st == "Rematch? (Y/N)" = return st
   | selectAll st =
-      let st' = st { chatInput = "", chatCursor = 0, selectAll = False, backHold = True, backCtrlHold = (ctrl==Down), backTimer = 0, backInitial = True }
+      let st' = st { chatInput = "", chatCursor = 0, selectAll = False
+                   , backHold = True, backCtrlHold = (ctrl==Down), backTimer = 0, backInitial = True }
       in swapMVar var st' >> return st'
   | ctrl == Down =
       let (s', i') = deletePrevWordAt (chatInput st) (chatCursor st)
-          st' = st { chatInput = s', chatCursor = i', backHold = True, backCtrlHold = True, backTimer = 0, backInitial = True }
+          st' = st { chatInput = s', chatCursor = i'
+                   , backHold = True, backCtrlHold = True, backTimer = 0, backInitial = True }
       in swapMVar var st' >> return st'
   | otherwise =
       let (s', i') = backspaceAt (chatInput st) (chatCursor st)
-          st' = st { chatInput = s', chatCursor = i', backHold = True, backCtrlHold = False, backTimer = 0, backInitial = True }
+          st' = st { chatInput = s', chatCursor = i'
+                   , backHold = True, backCtrlHold = False, backTimer = 0, backInitial = True }
       in swapMVar var st' >> return st'
 
 handleInput var (EventKey (SpecialKey KeyBackspace) Up _ _) st =
   swapMVar var (st { backHold = False }) >> return (st { backHold = False })
 
--- Fallback delete/bs
-handleInput var (EventKey (Char '\b') Down (Modifiers _ ctrl _) _) st =
-  handleInput var (EventKey (SpecialKey KeyBackspace) Down (Modifiers Up ctrl Up) (0,0)) st
-handleInput var (EventKey (Char '\b') Up _ _) st =
-  handleInput var (EventKey (SpecialKey KeyBackspace) Up (Modifiers Up Up Up) (0,0)) st
-handleInput var (EventKey (Char '\DEL') Down (Modifiers _ ctrl _) _) st =
-  handleInput var (EventKey (SpecialKey KeyBackspace) Down (Modifiers Up ctrl Up) (0,0)) st
-handleInput var (EventKey (Char '\DEL') Up _ _) st =
-  handleInput var (EventKey (SpecialKey KeyBackspace) Up (Modifiers Up Up Up) (0,0)) st
+-- Arrow Left/Right with hold and Ctrl
+handleInput var (EventKey (SpecialKey KeyLeft) Down (Modifiers _ ctrl _) _) st
+  | statusMessage st == "Rematch? (Y/N)" = return st
+  | otherwise =
+      let s = chatInput st; i = chatCursor st
+          i' = if ctrl == Down then moveWordLeft s i else max 0 (i - 1)
+          st' = st { chatCursor = i', selectAll = False
+                   , leftHold = True, leftCtrlHold = (ctrl==Down), leftTimer = 0, leftInitial = True }
+      in swapMVar var st' >> return st'
 
--- Ctrl+A
-handleInput var (EventKey (Char 'a') Down (Modifiers _ Down _) _) st =
-  let s = chatInput st; st' = st { chatCursor = length s, selectAll = not (null s) }
-  in swapMVar var st' >> return st'
+handleInput var (EventKey (SpecialKey KeyLeft) Up _ _) st =
+  swapMVar var (st { leftHold = False }) >> return (st { leftHold = False })
 
--- Space
+handleInput var (EventKey (SpecialKey KeyRight) Down (Modifiers _ ctrl _) _) st
+  | statusMessage st == "Rematch? (Y/N)" = return st
+  | otherwise =
+      let s = chatInput st; i = chatCursor st; l = length s
+          i' = if ctrl == Down then moveWordRight s i else min l (i + 1)
+          st' = st { chatCursor = i', selectAll = False
+                   , rightHold = True, rightCtrlHold = (ctrl==Down), rightTimer = 0, rightInitial = True }
+      in swapMVar var st' >> return st'
+
+handleInput var (EventKey (SpecialKey KeyRight) Up _ _) st =
+  swapMVar var (st { rightHold = False }) >> return (st { rightHold = False })
+
+-- Space with hold
 handleInput var (EventKey (SpecialKey KeySpace) Down _ _) st
   | statusMessage st == "Rematch? (Y/N)" = return st
   | otherwise =
-      let baseS = if selectAll st then " " else chatInput st
-          baseI = if selectAll st then 0   else chatCursor st
+      let baseS = if selectAll st then "" else chatInput st
+          baseI = if selectAll st then 0  else chatCursor st
           (s', i') = insertCharAt ' ' baseS baseI
-          st' = st { chatInput = s', chatCursor = i', selectAll = False }
+          st' = st { chatInput = s', chatCursor = i', selectAll = False
+                   , charHold = Just ' ', charTimer = 0, charInitial = True }
       in swapMVar var st' >> return st'
 
--- Typing / Y/N in rematch
+handleInput var (EventKey (SpecialKey KeySpace) Up _ _) st =
+  swapMVar var (st { charHold = Nothing, charTimer = 0, charInitial = True }) >>
+  return (st { charHold = Nothing, charTimer = 0, charInitial = True })
+
+-- === Fallback delete/bs phát sinh dạng Char: ĐẶT TRƯỚC handler Char tổng quát
+handleInput var (EventKey (Char '\b')  Down (Modifiers _ ctrl _) _) st =
+  handleInput var (EventKey (SpecialKey KeyBackspace) Down (Modifiers Up ctrl Up) (0,0)) st
+handleInput var (EventKey (Char '\b')  Up   _                         _) st =
+  handleInput var (EventKey (SpecialKey KeyBackspace) Up   (Modifiers Up Up  Up) (0,0)) st
+handleInput var (EventKey (Char '\DEL') Down (Modifiers _ ctrl _) _) st =
+  handleInput var (EventKey (SpecialKey KeyBackspace) Down (Modifiers Up ctrl Up) (0,0)) st
+handleInput var (EventKey (Char '\DEL') Up   _                         _) st =
+  handleInput var (EventKey (SpecialKey KeyBackspace) Up   (Modifiers Up Up  Up) (0,0)) st
+
+-- Typing / Y/N in rematch / Char hold
 handleInput var (EventKey (Char c) Down _ _) st
   | statusMessage st == "Rematch? (Y/N)" =
       case toUpper c of
@@ -265,9 +299,17 @@ handleInput var (EventKey (Char c) Down _ _) st
         'N' -> hPutStrLn (serverHandle st) "N" >> swapMVar var (st { statusMessage = "Quitting." }) >> return (st { statusMessage = "Quitting." })
         _   -> return st
   | c >= ' ' =
-      let (s', i') = insertCharAt c (chatInput st) (chatCursor st)
-      in swapMVar var (st { chatInput = s', chatCursor = i', selectAll = False }) >> return (st { chatInput = s', chatCursor = i', selectAll = False })
+      let baseS = if selectAll st then "" else chatInput st
+          baseI = if selectAll st then 0  else chatCursor st
+          (s', i') = insertCharAt c baseS baseI
+          st' = st { chatInput = s', chatCursor = i', selectAll = False
+                   , charHold = Just c, charTimer = 0, charInitial = True }
+      in swapMVar var st' >> return st'
   | otherwise = return st
+
+handleInput var (EventKey (Char _) Up _ _) st =
+  swapMVar var (st { charHold = Nothing, charTimer = 0, charInitial = True }) >>
+  return (st { charHold = Nothing, charTimer = 0, charInitial = True })
 
 handleInput _ _ st = return st
 
@@ -335,4 +377,20 @@ applyRepeats dt st =
                       in st2 { chatInput = s', chatCursor = i', selectAll = False, backTimer = 0, backInitial = False }
                  else st2 { backTimer = t }
           else st2 { backTimer = 0, backInitial = True }
-  in st3
+      st4 =
+        case charHold st3 of
+          Nothing -> st3 { charTimer = 0, charInitial = True }
+          Just ch ->
+            if statusMessage st3 == "Rematch? (Y/N)"
+               then st3 { charHold = Nothing, charTimer = 0, charInitial = True }
+               else
+                 let t = charTimer st3 + dt
+                     initP = charInitial st3
+                 in if (initP && t >= initialDelay) || (not initP && t >= repeatRate)
+                      then let baseS = chatInput st3
+                               baseI = chatCursor st3
+                               (s', i') = insertCharAt ch baseS baseI
+                           in st3 { chatInput = s', chatCursor = i', selectAll = False
+                                   , charTimer = 0, charInitial = False }
+                      else st3 { charTimer = t }
+  in st4
