@@ -42,7 +42,7 @@ ghc -isrc -O2 -Wall -threaded -odir bin -hidir bin -outputdir bin -o .\client.ex
 ## Tạo 3 terminal để chạy server cho 2 người chơi tham gia
 Terminal 1
 ```terminal
-./server.exe   # server lắng trên cổng 4444
+./server.exe   # tạo server
 ```
 
 Terminal 2
